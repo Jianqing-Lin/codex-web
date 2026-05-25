@@ -80,11 +80,11 @@
             </div>
             <label class="field">
               <span>Codex 参数</span>
-              <input id="argsInput" type="text" placeholder="例如：--approval-policy never" spellcheck="false" autocomplete="off">
+              <input id="argsInput" type="text" placeholder="例如：--sandbox danger-full-access" spellcheck="false" autocomplete="off">
             </label>
             <label class="toggle-row">
               <input id="ptyToggle" type="checkbox" checked>
-              <span>交互终端</span>
+              <span>终端使用 PTY</span>
             </label>
             <label class="toggle-row">
               <input id="autoScrollToggle" type="checkbox" checked>
@@ -125,6 +125,7 @@
               <div class="toolbar-group">
                 <button id="showChatBtn" class="quiet-action" type="button" disabled>聊天</button>
                 <button id="showTerminalBtn" class="quiet-action" type="button" disabled>终端</button>
+                <button id="startTerminalBtn" class="quiet-action" type="button" disabled>启动终端</button>
                 <button id="sendInterruptBtn" class="quiet-action" type="button" disabled>中断</button>
                 <button id="sendEnterBtn" class="quiet-action" type="button" disabled>回车</button>
                 <button id="clearLogBtn" class="quiet-action" type="button">清空</button>
@@ -147,7 +148,17 @@
               <div class="prompt-footer">
                 <button id="uploadComposerBtn" class="composer-icon" type="button" title="上传文件" aria-label="上传文件">+</button>
                 <span class="permission-chip">完全访问权限</span>
-                <span class="model-chip">5.5 超高</span>
+                <label class="model-picker" title="模型">
+                  <span>模型</span>
+                  <input id="modelInput" list="modelOptions" value="gpt-5.5" spellcheck="false" autocomplete="off">
+                </label>
+                <datalist id="modelOptions">
+                  <option value="gpt-5.5"></option>
+                  <option value="gpt-5"></option>
+                  <option value="gpt-4.1"></option>
+                  <option value="o3"></option>
+                  <option value="o4-mini"></option>
+                </datalist>
                 <button id="sendRawBtn" class="quiet-action raw-action" type="button" disabled>原样</button>
                 <button id="sendPromptBtn" class="send-button" type="submit" title="发送" aria-label="发送" disabled>↵</button>
               </div>

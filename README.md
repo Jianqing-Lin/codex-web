@@ -4,9 +4,11 @@ Codex Web is a lightweight local web console for running the Codex CLI from a br
 
 ## Features
 
-- Run interactive Codex CLI sessions over WebSocket.
-- Chat and terminal views for the same running process.
-- Continue previous Codex sessions through `codex resume <session-id>`.
+- Send normal chat messages as background `codex exec` tasks instead of launching an interactive terminal.
+- Start interactive Codex CLI terminal sessions explicitly when raw terminal control is needed.
+- Chat and terminal views for the same workspace.
+- Continue previous Codex sessions through `codex exec resume <session-id>` in chat mode, or `codex resume <session-id>` in terminal mode.
+- Select the model from the composer before sending a message.
 - Browse and edit files under `/root`.
 - Upload files and attach them as task context.
 - Discover local projects from common markers such as `.git`, `package.json`, `pyproject.toml`, `Cargo.toml`, and `go.mod`.
@@ -77,13 +79,15 @@ tmux new-session -d -s codex-web 'node server.js'
 
 The sidebar lists previous Codex sessions found under `~/.codex/sessions`.
 
-To continue an old conversation:
+To continue an old conversation in chat mode:
 
 1. Open a historical conversation from the sidebar.
 2. Click `继续`, or type a new message while that historical conversation is selected.
-3. The backend starts Codex with `codex resume <session-id>`.
+3. The backend runs `codex exec resume <session-id> -` and sends the prompt through stdin.
 
 The UI also restores visible historical messages into the chat pane so the resumed session is easier to follow.
+
+The interactive terminal is separate. Use `启动终端` or `原样` when you need to control a live Codex TUI process.
 
 ## File Scope
 

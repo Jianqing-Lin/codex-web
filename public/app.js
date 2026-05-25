@@ -14,6 +14,7 @@ const state = {
   ws: null,
   ready: false,
   running: false,
+  runKind: "",
   ptyAvailable: false,
   reconnectTimer: null,
   currentCwd: "/root",
@@ -39,6 +40,7 @@ const state = {
   catalogFilter: "",
   catalogSelected: null,
   selectedTools: [],
+  selectedModel: "gpt-5.5",
   sessionTitle: "新对话",
   activeChatOutput: null,
   activeChatOutputKind: "",
@@ -77,6 +79,7 @@ const dom = {
   projectList: document.getElementById("projectList"),
   promptForm: document.getElementById("promptForm"),
   promptInput: document.getElementById("promptInput"),
+  modelInput: document.getElementById("modelInput"),
   ptyStatus: document.getElementById("ptyStatus"),
   ptyToggle: document.getElementById("ptyToggle"),
   newFileBtn: document.getElementById("newFileBtn"),
@@ -99,6 +102,7 @@ const dom = {
   socketStatus: document.getElementById("socketStatus"),
   sourceList: document.getElementById("sourceList"),
   startBtn: document.getElementById("startBtn"),
+  startTerminalBtn: document.getElementById("startTerminalBtn"),
   stageTitleText: document.getElementById("stageTitleText"),
   stopBtn: document.getElementById("stopBtn"),
   terminal: document.getElementById("terminal"),
@@ -120,6 +124,10 @@ function loadStoredState() {
     }
     if (typeof stored.args === "string") {
       dom.argsInput.value = stored.args;
+    }
+    if (typeof stored.model === "string") {
+      state.selectedModel = stored.model;
+      dom.modelInput.value = stored.model;
     }
     if (typeof stored.notes === "string") {
       dom.sessionNotes.value = stored.notes;
@@ -143,6 +151,7 @@ function saveStoredState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     cwd: dom.cwdInput.value.trim() || "/root",
     args: dom.argsInput.value,
+    model: dom.modelInput.value.trim(),
     notes: dom.sessionNotes.value,
     pty: dom.ptyToggle.checked,
     autoScroll: dom.autoScrollToggle.checked
@@ -179,18 +188,28 @@ function setProcessStatus(kind, text) {
   dom.processStatus.textContent = text;
 }
 
+function getSelectedModel() {
+  const model = dom.modelInput.value.trim();
+  state.selectedModel = model;
+  return model;
+}
+
 function updateControls() {
-  dom.startBtn.disabled = !state.ready || state.running;
+  const terminalRunning = state.running && state.runKind === "terminal";
+  const chatRunning = state.running && state.runKind === "chat";
+  dom.startBtn.disabled = state.running;
+  dom.startTerminalBtn.disabled = !state.ready || state.running;
   dom.stopBtn.disabled = !state.running;
-  dom.sendPromptBtn.disabled = !state.ready;
-  dom.sendRawBtn.disabled = !state.ready;
-  dom.sendEnterBtn.disabled = !state.running;
-  dom.sendInterruptBtn.disabled = !state.running;
+  dom.sendPromptBtn.disabled = !state.ready || state.uploading || state.running;
+  dom.sendRawBtn.disabled = !state.ready || chatRunning;
+  dom.sendEnterBtn.disabled = !terminalRunning;
+  dom.sendInterruptBtn.disabled = !terminalRunning;
   dom.showChatBtn.disabled = state.viewMode === "chat";
   dom.showTerminalBtn.disabled = state.viewMode === "terminal";
   dom.uploadComposerBtn.disabled = state.uploading;
   dom.uploadFilesBtn.disabled = state.uploading;
   dom.attachFileBtn.disabled = !state.currentFile;
+  dom.modelInput.disabled = state.running;
   dom.ptyStatus.textContent = state.ptyAvailable ? "终端" : "管道";
   dom.ptyStatus.className = `status-pill ${state.ptyAvailable ? "connected" : "idle"}`;
 }
@@ -430,15 +449,15 @@ function sendWs(payload) {
   return true;
 }
 
-function sendInput(data, echo = true, preferredView = "chat") {
-  if (preferredView === "terminal") {
-    showTerminalView();
-  } else {
-    showChatView();
-  }
+function sendTerminalInput(data, echo = true) {
+  showTerminalView();
   if (!state.running) {
     state.pendingInput = data;
-    startSession();
+    startTerminalSession();
+    return;
+  }
+  if (state.runKind !== "terminal") {
+    appendChatStatus("当前聊天任务运行中，不能写入终端", "error");
     return;
   }
   if (echo) {
@@ -447,11 +466,11 @@ function sendInput(data, echo = true, preferredView = "chat") {
   sendWs({ type: "stdin", data });
 }
 
-function startSession() {
+function startTerminalSession() {
   if (!state.ready || state.running) {
     return;
   }
-  showChatView();
+  showTerminalView();
 
   const resumeSession = selectedHistorySession();
   const resumeSessionId = resumeSession ? resumeSession.id : null;
@@ -467,17 +486,49 @@ function startSession() {
   setCurrentCwd(cwd);
   const size = estimateTerminalSize();
   const requestedPty = dom.ptyToggle.checked;
+  const model = getSelectedModel();
   const actionLabel = resumeSessionId ? "继续历史对话" : "启动 Codex";
   appendEvent(`正在 ${cwd} ${actionLabel}`);
-  appendChatStatus(`正在 ${cwd} ${actionLabel}`, "pending");
   sendWs({
     type: "start",
     cwd,
     args,
+    model,
     resumeSessionId,
     pty: requestedPty,
     cols: size.cols,
     rows: size.rows
+  });
+}
+
+function sendChatPrompt(prompt) {
+  if (!state.ready || state.running) {
+    return false;
+  }
+
+  const resumeSession = selectedHistorySession();
+  const resumeSessionId = resumeSession ? resumeSession.id : null;
+  const cwd = dom.cwdInput.value.trim() || "/root";
+  let args;
+  try {
+    args = parseArgs(dom.argsInput.value);
+  } catch (err) {
+    appendChatStatus(err.message, "error");
+    appendEvent(err.message, "stderr");
+    return false;
+  }
+
+  setCurrentCwd(cwd);
+  const model = getSelectedModel();
+  const actionLabel = resumeSessionId ? "继续历史对话" : "发送聊天任务";
+  appendEvent(`正在 ${cwd} ${actionLabel}`);
+  return sendWs({
+    type: "prompt",
+    cwd,
+    args,
+    model,
+    resumeSessionId,
+    prompt
   });
 }
 
@@ -505,7 +556,7 @@ function newConversation() {
   setSessionTitle("新对话");
   showChatView();
   appendChatStatus("新对话已创建", "done");
-  startSession();
+  dom.promptInput.focus();
 }
 
 function formatMode(mode) {
@@ -514,6 +565,9 @@ function formatMode(mode) {
   }
   if (mode === "spawn") {
     return "管道";
+  }
+  if (mode === "exec") {
+    return "后台";
   }
   return String(mode || "").toUpperCase();
 }
@@ -546,33 +600,46 @@ function connectSocket() {
         break;
       case "started":
         state.running = true;
+        state.runKind = message.runKind || "terminal";
         clearChatOutputTarget();
-        setProcessStatus("running", formatMode(message.mode));
+        setProcessStatus("running", state.runKind === "chat" ? "思考中" : formatMode(message.mode));
         setLastEvent(`已启动 pid ${message.pid}`);
         appendEvent(`已启动 pid ${message.pid}（${formatMode(message.mode)}）`);
-        appendChatStatus(message.resumeSessionId ? `已继续历史对话 ${message.resumeSessionId}` : `已启动 ${formatMode(message.mode)} 会话`, "ok");
+        if (state.runKind === "chat") {
+          appendChatStatus(message.resumeSessionId ? "正在基于历史对话处理" : "正在后台处理", "ok");
+        } else {
+          appendChatStatus(message.resumeSessionId ? `已继续历史终端 ${message.resumeSessionId}` : `已启动 ${formatMode(message.mode)} 终端`, "ok");
+        }
         updateControls();
         if (state.pendingInput !== null) {
           const pending = state.pendingInput;
           state.pendingInput = null;
-          window.setTimeout(() => sendInput(pending), 80);
+          window.setTimeout(() => sendTerminalInput(pending), 80);
         }
         break;
       case "stdout":
-        appendOutput(message.data, "stdout");
+        if (state.runKind === "terminal") {
+          appendOutput(message.data, "stdout");
+        }
         appendChatOutput(message.data, "stdout");
         break;
       case "stderr":
-        appendOutput(message.data, "stderr");
+        if (state.runKind === "terminal") {
+          appendOutput(message.data, "stderr");
+        }
         appendChatOutput(message.data, "stderr");
         break;
       case "exit":
+        const exitedRunKind = state.runKind;
         state.running = false;
+        state.runKind = "";
         clearChatOutputTarget();
         setProcessStatus("idle", "空闲");
         setLastEvent(`已退出 ${message.code ?? ""}`);
         appendEvent(`进程已退出 code=${message.code ?? "null"} signal=${message.signal ?? "null"}`);
-        appendChatStatus(`进程已退出 code=${message.code ?? "null"} signal=${message.signal ?? "null"}`, "done");
+        appendChatStatus(exitedRunKind === "chat"
+          ? `后台聊天已结束 code=${message.code ?? "null"}`
+          : `终端已退出 code=${message.code ?? "null"} signal=${message.signal ?? "null"}`, "done");
         updateControls();
         loadHistory();
         break;
@@ -591,6 +658,7 @@ function connectSocket() {
   state.ws.addEventListener("close", () => {
     state.ready = false;
     state.running = false;
+    state.runKind = "";
     clearChatOutputTarget();
     setSocketStatus("disconnected", "离线");
     setProcessStatus("failed", "已关闭");
@@ -1277,7 +1345,9 @@ function continueHistorySession(session) {
   setSessionTitle(session.title || "历史会话");
   hydrateChatFromHistory();
   showChatView();
-  startSession();
+  appendChatStatus("已选择历史对话，发送消息会继续这个会话", "done");
+  setLastEvent("已选择历史对话");
+  dom.promptInput.focus();
 }
 
 function renderHistorySession(data) {
@@ -1678,10 +1748,11 @@ function handleDrop(event) {
 
 function bindEvents() {
   dom.startBtn.addEventListener("click", newConversation);
+  dom.startTerminalBtn.addEventListener("click", startTerminalSession);
   dom.stopBtn.addEventListener("click", () => stopSession());
-  dom.sendInterruptBtn.addEventListener("click", () => sendInput("\x03", false, "terminal"));
-  dom.sendEnterBtn.addEventListener("click", () => sendInput("\n", false, "terminal"));
-  dom.sendRawBtn.addEventListener("click", () => sendInput(dom.promptInput.value, false, "terminal"));
+  dom.sendInterruptBtn.addEventListener("click", () => sendTerminalInput("\x03", false));
+  dom.sendEnterBtn.addEventListener("click", () => sendTerminalInput("\n", false));
+  dom.sendRawBtn.addEventListener("click", () => sendTerminalInput(dom.promptInput.value, false));
 
   dom.promptForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1702,10 +1773,11 @@ function bindEvents() {
     showChatView();
     appendChatMessage("user", visibleText, { attachments, tools });
     appendChatStatus("正在思考", "pending");
-    sendInput(`${buildPromptPayload(value)}\n`, true, "chat");
-    dom.promptInput.value = "";
-    resizePromptInput();
-    clearAttachments();
+    if (sendChatPrompt(buildPromptPayload(value))) {
+      dom.promptInput.value = "";
+      resizePromptInput();
+      clearAttachments();
+    }
   });
 
   dom.promptInput.addEventListener("keydown", (event) => {
@@ -1810,7 +1882,7 @@ function bindEvents() {
     }
   });
 
-  for (const node of [dom.argsInput, dom.ptyToggle, dom.autoScrollToggle, dom.sessionNotes]) {
+  for (const node of [dom.argsInput, dom.modelInput, dom.ptyToggle, dom.autoScrollToggle, dom.sessionNotes]) {
     node.addEventListener("input", saveStoredState);
     node.addEventListener("change", saveStoredState);
   }

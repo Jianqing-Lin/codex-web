@@ -18,6 +18,7 @@ const CODEX_HISTORY_FILE = path.join(CODEX_HOME, "history.jsonl");
 const CODEX_SKILLS_DIR = path.join(CODEX_HOME, "skills");
 const CODEX_PLUGINS_DIR = path.join(CODEX_HOME, ".tmp", "plugins", "plugins");
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_PROMPT_BYTES = 2 * 1024 * 1024;
 const MAX_FILE_BYTES = 1.5 * 1024 * 1024;
 const MAX_UPLOAD_BODY_BYTES = 40 * 1024 * 1024;
 const MAX_UPLOAD_FILE_BYTES = 20 * 1024 * 1024;
@@ -137,11 +138,46 @@ function sanitizeSessionId(input) {
   return value;
 }
 
-function buildCodexArgs(args, resumeSessionId) {
-  if (!resumeSessionId) {
-    return args;
+function sanitizeModel(input) {
+  if (input === undefined || input === null || input === "") {
+    return "";
   }
-  return ["resume", ...args, resumeSessionId];
+  const value = String(input).trim();
+  if (!value) {
+    return "";
+  }
+  if (value.includes("\0") || !/^[A-Za-z0-9._:/+-]{1,128}$/.test(value)) {
+    throw new Error("模型名称无效");
+  }
+  return value;
+}
+
+function sanitizePrompt(input) {
+  const value = String(input || "");
+  if (Buffer.byteLength(value, "utf8") > MAX_PROMPT_BYTES) {
+    throw new Error("提示内容过大");
+  }
+  return value;
+}
+
+function modelArgs(model) {
+  return model ? ["-m", model] : [];
+}
+
+function buildCodexArgs(args, resumeSessionId, model) {
+  const runArgs = [...args, ...modelArgs(model)];
+  if (!resumeSessionId) {
+    return runArgs;
+  }
+  return ["resume", ...runArgs, resumeSessionId];
+}
+
+function buildExecArgs(args, resumeSessionId, model) {
+  const runArgs = [...args, ...modelArgs(model)];
+  if (resumeSessionId) {
+    return ["exec", ...runArgs, "resume", resumeSessionId, "-"];
+  }
+  return ["exec", ...runArgs, "-"];
 }
 
 function collectJson(req, maxBytes = MAX_BODY_BYTES) {
@@ -961,11 +997,21 @@ function startWithPty(ws, session, options) {
 
   session.child = term;
   session.mode = "pty";
-  send(ws, { type: "started", pid: term.pid, cwd: options.cwd, mode: "pty", resumeSessionId: options.resumeSessionId || null });
+  session.runKind = options.runKind || "terminal";
+  send(ws, {
+    type: "started",
+    pid: term.pid,
+    cwd: options.cwd,
+    mode: "pty",
+    runKind: session.runKind,
+    resumeSessionId: options.resumeSessionId || null,
+    model: options.model || ""
+  });
 
   term.onData((data) => send(ws, { type: "stdout", data }));
   term.onExit(({ exitCode, signal }) => {
     session.child = null;
+    session.runKind = null;
     send(ws, { type: "exit", code: exitCode, signal: signal || null });
   });
 }
@@ -980,16 +1026,34 @@ function startWithSpawn(ws, session, options) {
 
   session.child = child;
   session.mode = "spawn";
-  send(ws, { type: "started", pid: child.pid, cwd: options.cwd, mode: "spawn", resumeSessionId: options.resumeSessionId || null });
+  session.runKind = options.runKind || "terminal";
+  send(ws, {
+    type: "started",
+    pid: child.pid,
+    cwd: options.cwd,
+    mode: "spawn",
+    runKind: session.runKind,
+    resumeSessionId: options.resumeSessionId || null,
+    model: options.model || ""
+  });
+
+  child.stdin.on("error", () => {
+    // Fast-exiting commands may close stdin before the prompt is written.
+  });
+  if (typeof options.stdinData === "string") {
+    child.stdin.end(options.stdinData);
+  }
 
   child.stdout.on("data", (chunk) => send(ws, { type: "stdout", data: chunk.toString("utf8") }));
   child.stderr.on("data", (chunk) => send(ws, { type: "stderr", data: chunk.toString("utf8") }));
   child.on("error", (err) => {
     session.child = null;
+    session.runKind = null;
     send(ws, { type: "error", message: err.message });
   });
   child.on("close", (code, signal) => {
     session.child = null;
+    session.runKind = null;
     send(ws, { type: "exit", code, signal });
   });
 }
@@ -1015,17 +1079,57 @@ function handleStart(ws, session, message) {
   const cwd = normalizeCwd(message.cwd);
   const args = sanitizeArgs(message.args);
   const resumeSessionId = sanitizeSessionId(message.resumeSessionId);
+  const model = sanitizeModel(message.model);
   const env = { ...process.env, ...sanitizeEnv(message.env), TERM: "xterm-256color" };
   const cols = Number.isInteger(message.cols) ? message.cols : 120;
   const rows = Number.isInteger(message.rows) ? message.rows : 30;
   const usePty = message.pty === true && pty;
-  const options = { cwd, args: buildCodexArgs(args, resumeSessionId), env, cols, rows, resumeSessionId };
+  const options = {
+    cwd,
+    args: buildCodexArgs(args, resumeSessionId, model),
+    env,
+    cols,
+    rows,
+    runKind: "terminal",
+    resumeSessionId,
+    model
+  };
 
   if (usePty) {
     startWithPty(ws, session, options);
   } else {
     startWithSpawn(ws, session, options);
   }
+}
+
+function handlePrompt(ws, session, message) {
+  if (session.child) {
+    throw new Error("已有任务正在运行");
+  }
+
+  const prompt = sanitizePrompt(message.prompt);
+  if (!prompt.trim()) {
+    throw new Error("提示内容不能为空");
+  }
+
+  const cwd = normalizeCwd(message.cwd);
+  const args = sanitizeArgs(message.args);
+  const resumeSessionId = sanitizeSessionId(message.resumeSessionId);
+  const model = sanitizeModel(message.model);
+  const env = { ...process.env, ...sanitizeEnv(message.env), TERM: "xterm-256color" };
+  const options = {
+    cwd,
+    args: buildExecArgs(args, resumeSessionId, model),
+    env,
+    cols: 120,
+    rows: 30,
+    runKind: "chat",
+    resumeSessionId,
+    model,
+    stdinData: prompt.endsWith("\n") ? prompt : `${prompt}\n`
+  };
+
+  startWithSpawn(ws, session, options);
 }
 
 function handleMessage(ws, session, raw) {
@@ -1037,6 +1141,9 @@ function handleMessage(ws, session, raw) {
   }
 
   switch (message.type) {
+    case "prompt":
+      handlePrompt(ws, session, message);
+      break;
     case "start":
       handleStart(ws, session, message);
       break;
