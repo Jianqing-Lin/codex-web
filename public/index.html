@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Codex Web 控制台</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="app-sidebar" aria-label="导航、项目与历史记录">
+        <nav class="primary-nav" aria-label="主导航">
+          <button id="startBtn" class="nav-button strong" type="button">
+            <span class="nav-icon" aria-hidden="true">✎</span>
+            <span>新对话</span>
+          </button>
+          <button id="searchNavBtn" class="nav-button" type="button">
+            <span class="nav-icon" aria-hidden="true">⌕</span>
+            <span>搜索</span>
+          </button>
+          <button id="skillsNavBtn" class="nav-button" type="button">
+            <span class="nav-icon" aria-hidden="true">◈</span>
+            <span>技能</span>
+          </button>
+          <button id="pluginsNavBtn" class="nav-button" type="button">
+            <span class="nav-icon" aria-hidden="true">⌘</span>
+            <span>插件</span>
+          </button>
+          <button class="nav-button" type="button">
+            <span class="nav-icon" aria-hidden="true">◷</span>
+            <span>自动化</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-scroll">
+          <section class="sidebar-section">
+            <div class="section-heading">
+              <h2>项目</h2>
+              <button id="refreshProjectsBtn" class="icon-button" type="button" title="刷新项目" aria-label="刷新项目">↻</button>
+            </div>
+            <label class="path-control">
+              <span>工作区</span>
+              <input id="cwdInput" type="text" value="/root" spellcheck="false" autocomplete="off">
+            </label>
+            <div id="projectList" class="project-list" role="list"></div>
+          </section>
+
+          <section id="catalogSection" class="sidebar-section catalog-section">
+            <div class="section-heading">
+              <h2 id="catalogTitle">技能</h2>
+              <button id="refreshCatalogBtn" class="icon-button" type="button" title="刷新技能和插件" aria-label="刷新技能和插件">↻</button>
+            </div>
+            <div class="segmented-control" role="tablist" aria-label="技能和插件">
+              <button id="catalogSkillsTab" class="segment-button active" type="button" role="tab" aria-selected="true">技能</button>
+              <button id="catalogPluginsTab" class="segment-button" type="button" role="tab" aria-selected="false">插件</button>
+            </div>
+            <label class="search-control">
+              <span class="nav-icon" aria-hidden="true">⌕</span>
+              <input id="catalogSearchInput" type="search" placeholder="搜索技能或插件" autocomplete="off">
+            </label>
+            <div id="catalogList" class="catalog-list" role="list"></div>
+            <div id="catalogDetail" class="catalog-detail hidden"></div>
+          </section>
+
+          <section class="sidebar-section history-block">
+            <div class="section-heading">
+              <h2>对话</h2>
+              <button id="refreshHistoryBtn" class="icon-button" type="button" title="刷新历史记录" aria-label="刷新历史记录">↻</button>
+            </div>
+            <label class="search-control">
+              <span class="nav-icon" aria-hidden="true">⌕</span>
+              <input id="historySearchInput" type="search" placeholder="搜索历史对话" autocomplete="off">
+            </label>
+            <div id="historyList" class="history-list" role="list"></div>
+          </section>
+
+          <section class="sidebar-section run-section">
+            <div class="section-heading">
+              <h2>运行</h2>
+            </div>
+            <label class="field">
+              <span>Codex 参数</span>
+              <input id="argsInput" type="text" placeholder="例如：--approval-policy never" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="toggle-row">
+              <input id="ptyToggle" type="checkbox" checked>
+              <span>交互终端</span>
+            </label>
+            <label class="toggle-row">
+              <input id="autoScrollToggle" type="checkbox" checked>
+              <span>自动滚动</span>
+            </label>
+          </section>
+        </div>
+
+        <section class="sidebar-footer" aria-label="设置">
+          <div class="settings-row">
+            <span class="nav-icon" aria-hidden="true">⚙</span>
+            <span>设置</span>
+          </div>
+          <textarea id="sessionNotes" class="notes-area" placeholder="会话笔记保存在当前浏览器。" spellcheck="true"></textarea>
+        </section>
+      </aside>
+
+      <section class="stage" aria-label="Codex Web">
+        <header class="stage-header">
+          <div class="stage-title">
+            <h1 id="stageTitleText">新对话</h1>
+            <div class="stage-subtitle" id="activeCwd">/root</div>
+          </div>
+
+          <div class="header-actions">
+            <div class="status-strip">
+              <span id="socketStatus" class="status-pill disconnected">未连接</span>
+              <span id="processStatus" class="status-pill idle">空闲</span>
+              <span id="ptyStatus" class="status-pill">PTY</span>
+            </div>
+            <button id="stopBtn" class="stop-button" type="button" title="停止会话" aria-label="停止会话" disabled>■</button>
+          </div>
+        </header>
+
+        <main class="workspace">
+          <section class="main-panel" aria-label="Codex 会话">
+            <div class="conversation-toolbar">
+              <div class="toolbar-group">
+                <button id="showChatBtn" class="quiet-action" type="button" disabled>聊天</button>
+                <button id="showTerminalBtn" class="quiet-action" type="button" disabled>终端</button>
+                <button id="sendInterruptBtn" class="quiet-action" type="button" disabled>中断</button>
+                <button id="sendEnterBtn" class="quiet-action" type="button" disabled>回车</button>
+                <button id="clearLogBtn" class="quiet-action" type="button">清空</button>
+                <button id="copyLogBtn" class="quiet-action" type="button">复制</button>
+              </div>
+              <div id="lastEvent" class="last-event">就绪</div>
+            </div>
+
+            <div class="output-area">
+              <div id="chatStream" class="chat-stream" role="log" aria-live="polite" aria-label="聊天记录"></div>
+              <div id="terminal" class="terminal hidden" role="log" aria-live="polite" aria-label="终端输出"></div>
+              <div id="historyViewer" class="history-viewer hidden" aria-label="历史聊天记录"></div>
+            </div>
+
+            <form id="promptForm" class="prompt-bar">
+              <div id="composerQuickActions" class="composer-quick-actions" aria-label="快捷任务"></div>
+              <div id="toolTray" class="tool-tray hidden" aria-label="已选择的技能和插件"></div>
+              <div id="attachmentTray" class="attachment-tray hidden" aria-label="上下文附件"></div>
+              <textarea id="promptInput" rows="3" placeholder="要求后续变更" spellcheck="true"></textarea>
+              <div class="prompt-footer">
+                <button id="uploadComposerBtn" class="composer-icon" type="button" title="上传文件" aria-label="上传文件">+</button>
+                <span class="permission-chip">完全访问权限</span>
+                <span class="model-chip">5.5 超高</span>
+                <button id="sendRawBtn" class="quiet-action raw-action" type="button" disabled>原样</button>
+                <button id="sendPromptBtn" class="send-button" type="submit" title="发送" aria-label="发送" disabled>↵</button>
+              </div>
+            </form>
+          </section>
+
+          <aside class="right-panel" aria-label="输出与文件">
+            <section class="inspector-card file-browser">
+              <div class="section-heading">
+                <h2>输出</h2>
+                <div class="toolbar-group">
+                  <button id="uploadFilesBtn" class="icon-button" type="button" title="上传文件" aria-label="上传文件">↑</button>
+                  <button id="refreshTreeBtn" class="icon-button" type="button" title="刷新文件" aria-label="刷新文件">↻</button>
+                </div>
+              </div>
+              <input id="uploadInput" class="file-input" type="file" multiple>
+              <div id="recentUploadList" class="recent-upload-list hidden" aria-label="最近上传"></div>
+              <div id="sourceList" class="source-list" aria-label="来源"></div>
+              <div class="file-path-row">
+                <button id="upDirBtn" class="icon-button" type="button" title="上级目录" aria-label="上级目录">↑</button>
+                <input id="treePathInput" type="text" value="/root" spellcheck="false" autocomplete="off">
+              </div>
+              <div id="fileTree" class="file-tree" role="tree"></div>
+            </section>
+
+            <section class="inspector-card editor-block">
+              <div class="section-heading">
+                <h2 id="editorTitle">预览</h2>
+                <div class="toolbar-group">
+                  <button id="newFileBtn" class="icon-button" type="button" title="新建文件" aria-label="新建文件">+</button>
+                  <button id="attachFileBtn" class="icon-button" type="button" title="添加到上下文" aria-label="添加到上下文" disabled>⊕</button>
+                  <button id="reloadFileBtn" class="icon-button" type="button" title="重新加载文件" aria-label="重新加载文件" disabled>↺</button>
+                  <button id="saveFileBtn" class="icon-button" type="button" title="保存文件" aria-label="保存文件" disabled>✓</button>
+                </div>
+              </div>
+              <div id="fileMeta" class="file-meta">未选择文件</div>
+              <div class="editor-path-row">
+                <input id="filePathInput" type="text" placeholder="/root/example.txt" spellcheck="false" autocomplete="off" disabled>
+              </div>
+              <textarea id="fileEditor" class="file-editor" spellcheck="false" disabled></textarea>
+            </section>
+          </aside>
+        </main>
+      </section>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
